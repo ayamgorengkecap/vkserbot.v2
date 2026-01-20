@@ -1,20 +1,22 @@
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.log
-.DS_Store
-*.swp
-*.swo
-*~
-*.so
-*.pyi
-build/
-dist/
-*.spec
-
-# Sensitive data
+# Account data (sensitive)
 accounts/
-config/api_keys.json
-config.json
-backup_proxies.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

@@ -45,18 +45,29 @@ Before running this bot, you need to register accounts using the account registr
 
 ### Step 1: Register Accounts
 
+**IMPORTANT:** You must create accounts first using the registration tool.
+
 1. Clone the account registration tool:
 ```bash
-git clone https://github.com/ayamgorengkecap/ayams
-cd ayams
+git clone https://github.com/ayamgorengkecap/vkservtermux
+cd vkservtermux
 ```
 
-2. Follow the instructions in the ayams repository to create accounts
+2. Follow the instructions in the [vkservtermux repository](https://github.com/ayamgorengkecap/vkservtermux) to:
+   - Install dependencies
+   - Configure VK tokens (see [video tutorial](https://youtu.be/F8q90OlQ0lQ?si=_JrqemI1OTDvTRxV))
+   - Register accounts
 
 3. After registration, copy the generated account folders to this project:
 ```bash
-cp -r ayams/accounts/* vkserbot.v2/accounts/
+# From vkservtermux directory
+cp -r accounts/* /path/to/vkserbot.v2/accounts/
 ```
+
+**Note:** Each account folder should contain:
+- `config.json` - Account configuration
+- `ig_session_*.json` - Instagram session (if connected)
+- VK credentials and cookies
 
 ## Installation
 

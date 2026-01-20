@@ -1,0 +1,14 @@
+{
+  "webshare": {
+    "api_keys": [
+      "4gh3np13l06q3r7nyhs227bcibkool8p7f2k6cfo",
+      "o8glpf2pq9s0amasmiecu4spy89rfjqx0h3c4wxx"
+    ],
+    "api_url": "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=100",
+    "replace_url": "https://proxy.webshare.io/api/v2/proxy/replace/"
+  },
+  "telegram": {
+    "api_id": "1724399",
+    "api_hash": "7f6c4af5220db320413ff672093ee102"
+  }
+}

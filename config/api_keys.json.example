@@ -1,0 +1,14 @@
+{
+  "webshare": {
+    "api_keys": [
+      "YOUR_WEBSHARE_API_KEY_1",
+      "YOUR_WEBSHARE_API_KEY_2"
+    ],
+    "api_url": "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=100",
+    "replace_url": "https://proxy.webshare.io/api/v2/proxy/replace/"
+  },
+  "telegram": {
+    "api_id": "YOUR_TELEGRAM_API_ID",
+    "api_hash": "YOUR_TELEGRAM_API_HASH"
+  }
+}

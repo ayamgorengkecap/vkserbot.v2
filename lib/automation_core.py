@@ -89,8 +89,9 @@ def clear():
 
 
 
-from proxy_manager import ProxyManager
-from smart_proxy_manager import SmartProxyManager
+from proxy_manager import ProxyManager  # Legacy - kept for compatibility
+from smart_proxy_manager import SmartProxyManager  # Legacy - kept for compatibility
+from webshare_proxy_pool import get_proxy_pool  # NEW: Unified pool
 from account_request_manager import AccountRequestManager, RequestState
 
 def parse_proxy(proxy_string):
@@ -2481,74 +2482,91 @@ class VKSerfingBot:
 
 
         self.vk_account_blocked = False
+        self.vk_captcha_required = False
+        self.vk_flood_control_until = 0
+        self.ig_otp_required = False
+        self.tg_flood_wait_until = 0
 
 
         self.allow_direct = False
         proxy_string = config.get('proxy', {}).get('proxy_string', '')
 
-
+        # Get global proxy pool
+        proxy_pool = get_proxy_pool()
+        
+        # Get IPs already used by other accounts
         used_proxy_ips = get_all_used_proxies()
-
-
-        self.smart_proxy = SmartProxyManager(
-            account_name=account_name or "unknown",
-            initial_proxy=proxy_string,
-            error_threshold=3,
-            max_rotations=10,
-            exclude_ips=used_proxy_ips
-        )
-
-
-        self.proxy_manager = ProxyManager(
-            initial_proxy_string=proxy_string,
-            max_retries=1,
-            test_timeout=10,
-            max_proxy_attempts=100
-        )
-
-
+        
+        # Get proxy for this account
+        print(f"{C}[{account_name}] Initializing proxy...{W}")
+        
         if proxy_string:
-            success, ip_info = self.smart_proxy.test_proxy(timeout=10)
-            if success:
-                self.proxy_info = ip_info
-                proxy_dict = self.smart_proxy.get_proxy()
-                self.session.proxies.update({
-                    'http': proxy_dict['http'],
-                    'https': proxy_dict['https']
-                })
+            # Test existing proxy first
+            proxy_ip = proxy_string.split(':')[0] if ':' in proxy_string else None
+            
+            # Parse existing proxy
+            if '@' in proxy_string:
+                proxy_url = f"http://{proxy_string}" if not proxy_string.startswith('http') else proxy_string
             else:
-
-                if self.smart_proxy.rotate_now("initial proxy test failed"):
-                    proxy_dict = self.smart_proxy.get_proxy()
-                    if proxy_dict:
-                        self.session.proxies.update({
-                            'http': proxy_dict['http'],
-                            'https': proxy_dict['https']
-                        })
-                        info = self.smart_proxy.get_proxy_info()
-                        self.proxy_info = {'ip': info['ip']}
+                parts = proxy_string.split(':')
+                if len(parts) == 4:
+                    host, port, user, pwd = parts
+                    proxy_url = f"http://{user}:{pwd}@{host}:{port}"
                 else:
-                    raise Exception(f"PROXY_REQUIRED: All proxies failed for {account_name}")
-        else:
-
-            if self.smart_proxy.rotate_now("no proxy configured"):
-                proxy_dict = self.smart_proxy.get_proxy()
-                if proxy_dict:
-                    self.session.proxies.update({
-                        'http': proxy_dict['http'],
-                        'https': proxy_dict['https']
-                    })
-                    info = self.smart_proxy.get_proxy_info()
-                    self.proxy_info = {'ip': info['ip']}
-
-
-                    config['proxy'] = {
-                        'proxy_string': proxy_dict['raw'],
-                        'ip': info['ip'],
-                        'verified_at': time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-            else:
+                    proxy_url = None
+            
+            # Test existing proxy
+            if proxy_url:
+                test_proxies = {'http': proxy_url, 'https': proxy_url}
+                try:
+                    resp = requests.get('http://ip-api.com/json/', proxies=test_proxies, timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        self.proxy_info = {
+                            'ip': data.get('query'),
+                            'country': data.get('country', 'Unknown'),
+                            'city': data.get('city', 'Unknown')
+                        }
+                        self.session.proxies.update(test_proxies)
+                        self.current_proxy_ip = self.proxy_info['ip']
+                        print(f"{G}[{account_name}] ✓ Using existing proxy: {self.current_proxy_ip}{W}")
+                    else:
+                        raise Exception("Proxy test failed")
+                except:
+                    print(f"{Y}[{account_name}] Existing proxy failed, getting new one...{W}")
+                    proxy_string = None
+        
+        # If no proxy or existing failed, get new one from pool
+        if not proxy_string:
+            new_proxy = proxy_pool.get_proxy_for_account(account_name, exclude_ips=used_proxy_ips)
+            
+            if not new_proxy:
                 raise Exception(f"PROXY_REQUIRED: No proxy available for {account_name}")
+            
+            # Configure session with new proxy
+            self.session.proxies.update({
+                'http': new_proxy['proxy_url'],
+                'https': new_proxy['proxy_url']
+            })
+            self.proxy_info = new_proxy['ip_info']
+            self.current_proxy_ip = new_proxy['ip']
+            
+            # Save to config
+            config['proxy'] = {
+                'proxy_string': new_proxy['proxy_string'],
+                'ip': new_proxy['ip'],
+                'port': new_proxy['port'],
+                'username': new_proxy['username'],
+                'password': new_proxy['password'],
+                'verified_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            print(f"{G}[{account_name}] ✓ New proxy assigned: {self.current_proxy_ip}{W}")
+        
+        # Store proxy pool reference for rotation
+        self.proxy_pool = proxy_pool
+        self.proxy_rotation_count = 0
+        self.max_proxy_rotations = 5
 
 
         if config.get('user_agent', {}).get('user_agent'):
@@ -2581,11 +2599,12 @@ class VKSerfingBot:
             'X-Requested-With': 'XMLHttpRequest',
         })
 
-
+        # Initialize request manager with proxy pool
         self.request_manager = AccountRequestManager(
             account_name=account_name or "unknown",
             session=self.session,
-            smart_proxy=self.smart_proxy,
+            proxy_pool=self.proxy_pool,
+            current_proxy_ip=self.current_proxy_ip,
             config=config
         )
 
@@ -3686,31 +3705,20 @@ This account will be skipped until issue is resolved."""
             if 'Error 5' in error_str and 'user is blocked' in error_str:
                 self.vk_account_blocked = True
                 print(f"  {R}⚠ VK Account is BLOCKED - skipping all VK tasks{W}")
-
-                vk_task_types = ['friends', 'likes', 'repost', 'group', 'poll', 'video']
-                for vk_task in vk_task_types:
-                    self.task_type_skip.add(vk_task)
                 return "VK_ACCOUNT_BLOCKED"
 
 
             if 'Error 14' in error_str or 'Captcha' in error_str:
                 self.vk_captcha_required = True
                 print(f"  {Y}⚠ VK Captcha required - skipping all VK tasks this cycle{W}")
-                vk_task_types = ['friends', 'likes', 'repost', 'group', 'poll', 'video']
-                for vk_task in vk_task_types:
-                    self.task_type_skip.add(vk_task)
                 return "VK_CAPTCHA_REQUIRED"
 
 
             if 'Flood control' in error_str or 'Too many requests' in error_str or 'Error 6' in error_str:
                 cooldown = 60
                 self.vk_flood_control_until = time.time() + cooldown
-                self.vk_flood_detected_this_cycle = True
-                print(f"  {Y}⚠ VK Rate limit - skipping VK tasks this cycle{W}")
-                vk_task_types = ['friends', 'likes', 'repost', 'group', 'poll', 'video']
-                for vk_task in vk_task_types:
-                    self.task_type_skip.add(vk_task)
-                return "FLOOD_CONTROL"
+                print(f"  {Y}⚠ VK Rate limit - skipping VK tasks for {cooldown}s{W}")
+                return "VK_FLOOD_CONTROL"
 
             import traceback
             traceback.print_exc()
@@ -3811,6 +3819,70 @@ This account will be skipped until issue is resolved."""
             return False
 
         return False
+
+    def _is_task_allowed(self, task_type):
+        """
+        Centralized task filtering logic - FIXED: Pisahkan ACTION vs VIEW tasks
+        Returns: (allowed: bool, reason: str)
+        """
+        # Kategorisasi task berdasarkan platform dan tipe
+        vk_action_tasks = ['friends', 'group', 'likes', 'repost', 'poll']
+        vk_view_tasks = ['video']
+        
+        ig_action_tasks = ['instagram_followers', 'instagram_likes', 'instagram_comments']
+        ig_view_tasks = ['instagram_video', 'instagram_views', 'instagram_story']
+        
+        tg_action_tasks = ['telegram_followers']
+        tg_view_tasks = ['telegram_views']
+        
+        # VK ACTION tasks - butuh VK API & account tidak blocked
+        if task_type in vk_action_tasks:
+            if self.vk_account_blocked:
+                return False, "VK account blocked"
+            if self.vk_captcha_required:
+                return False, "VK captcha required"
+            if hasattr(self, 'vk_flood_control_until') and time.time() < self.vk_flood_control_until:
+                return False, "VK flood control"
+            if not hasattr(self, 'vk') or self.vk is None:
+                return False, "VK API not configured"
+        
+        # VK VIEW tasks - butuh VK API (untuk watch video via API), tapi tidak peduli blocked/flood
+        if task_type in vk_view_tasks:
+            if not hasattr(self, 'vk') or self.vk is None:
+                return False, "VK API not configured"
+            # Tidak check blocked/captcha - video view bisa jalan meski account blocked
+            # Tidak check flood - video view tidak kena flood limit
+        
+        # IG ACTION tasks - butuh IG login
+        if task_type in ig_action_tasks:
+            if not self.instagram_enabled:
+                return False, "IG not enabled"
+            if self.ig and self.ig.otp_required:
+                return False, "IG OTP required"
+            if hasattr(self, '_ig_action_skip') and self._ig_action_skip:
+                return False, "IG action skip"
+        
+        # IG VIEW tasks - TIDAK butuh IG login (view via web/proxy)
+        if task_type in ig_view_tasks:
+            pass  # Always allowed
+        
+        # TG ACTION tasks - butuh TG session
+        if task_type in tg_action_tasks:
+            if not self.telegram_enabled:
+                return False, "TG not enabled"
+            if hasattr(self, 'tg_flood_wait_until') and time.time() < self.tg_flood_wait_until:
+                return False, "TG flood wait"
+        
+        # TG VIEW tasks - TIDAK butuh TG session (view via web/proxy)
+        if task_type in tg_view_tasks:
+            pass  # Always allowed
+        
+        # Check consecutive errors (berlaku untuk semua task)
+        if task_type in self.task_type_skip:
+            error_count = self.task_type_errors.get(task_type, 0)
+            return False, f"Too many errors ({error_count})"
+        
+        return True, ""
 
     def is_view_task(self, task_type):
         """Check if task is a VIEW type (requires extra delay before check)"""
@@ -3994,13 +4066,28 @@ This account will be skipped until issue is resolved."""
         global STOP_FLAG
 
         mapping = {
-            'vk_friends': 'friends', 'vk_groups': 'group', 'vk_likes': 'likes',
-            'vk_reposts': 'repost', 'vk_polls': 'poll', 'vk_videos': 'video',
-            'instagram_followers': 'instagram_followers', 'instagram_likes': 'instagram_likes',
-            'instagram_comments': 'instagram_comments', 'instagram_video': 'instagram_video',
-            'instagram_views': 'instagram_views', 'instagram_story': 'instagram_story',
-            'telegram_followers': 'telegram_followers', 'telegram_views': 'telegram_views',
-            'tiktok_video': 'tiktok_video',
+            # VK tasks
+            'vk_friends': 'friends',      # ACTION
+            'vk_groups': 'group',          # ACTION
+            'vk_likes': 'likes',           # ACTION
+            'vk_reposts': 'repost',        # ACTION
+            'vk_polls': 'poll',            # ACTION
+            'vk_videos': 'video',          # VIEW (passive)
+            
+            # Instagram tasks
+            'instagram_followers': 'instagram_followers',  # ACTION
+            'instagram_likes': 'instagram_likes',          # ACTION
+            'instagram_comments': 'instagram_comments',    # ACTION
+            'instagram_video': 'instagram_video',          # VIEW (passive)
+            'instagram_views': 'instagram_views',          # VIEW (passive)
+            'instagram_story': 'instagram_story',          # VIEW (passive)
+            
+            # Telegram tasks
+            'telegram_followers': 'telegram_followers',    # ACTION
+            'telegram_views': 'telegram_views',            # VIEW (passive)
+            
+            # TikTok tasks
+            'tiktok_video': 'tiktok_video',                # VIEW (passive)
         }
 
 
@@ -4022,8 +4109,7 @@ This account will be skipped until issue is resolved."""
 
 
         if self.vk_account_blocked:
-            print(f"  {R}⚠ VK Account is BLOCKED - all VK tasks skipped{W}")
-
+            print(f"  {R}⚠ VK Account is BLOCKED - VK ACTION tasks skipped (views still work){W}")
 
         vk_api_available = hasattr(self, 'vk') and self.vk is not None
         if not vk_api_available:
@@ -4031,36 +4117,17 @@ This account will be skipped until issue is resolved."""
 
         enabled = []
 
-        ig_view_tasks = ['instagram_video', 'instagram_story']
-        for vt in ig_view_tasks:
-            if vt not in [v for k, v in mapping.items() if self.config.get('task_types', {}).get(k)]:
-                enabled.append(vt)
+        # REMOVED: Hardcode IG view tasks - sudah di-handle di mapping loop
 
         for k, v in mapping.items():
             if self.config.get('task_types', {}).get(k):
-
-                if v in self.task_type_skip:
-                    print(f"  {Y}Skipping {v} - too many consecutive errors (will retry after success){W}")
+                # Check apakah task allowed (sudah handle ACTION vs VIEW)
+                allowed, reason = self._is_task_allowed(v)
+                if not allowed:
                     continue
-
-
-                vk_task_types = ['friends', 'group', 'likes', 'repost', 'poll', 'video']
-                if v in vk_task_types and (self.vk_account_blocked or not vk_api_available):
-                    continue
-
+                
+                # IG rate limit - hanya untuk ACTION tasks
                 if v.startswith('instagram_'):
-
-                    is_view_task = v in ['instagram_video', 'instagram_views', 'instagram_story']
-
-                    if not self.instagram_enabled and not is_view_task:
-                        continue
-
-
-                    if self.ig and self.ig.otp_required and not is_view_task:
-                        print(f"  {Y}Skipping Instagram {v} - OTP verification required (check Telegram){W}")
-                        continue
-
-
                     action_type = None
                     if v == 'instagram_followers':
                         action_type = 'follow'
@@ -4070,18 +4137,12 @@ This account will be skipped until issue is resolved."""
                         action_type = 'comment'
 
                     if action_type and action_type in ig_rate_limited_actions:
-                        print(f"  {Y}Skipping Instagram {v} - {action_type} rate limited{W}")
                         continue
-                if v.startswith('telegram_') and not self.telegram_enabled:
-                    continue
+                
+                # REMOVED: Skip global TG/VK - sudah di-handle di _is_task_allowed
+                
+                # TikTok masih perlu check karena tidak ada view task
                 if v.startswith('tiktok_') and not self.has_tiktok_account:
-                    print(f"  {Y}Skipping TikTok tasks - account not connected{W}")
-                    continue
-
-
-                vk_task_types = ['friends', 'group', 'likes', 'repost', 'poll', 'video']
-                if v in vk_task_types and self.vk_account_blocked:
-                    print(f"  {Y}Skipping VK {v} - account blocked{W}")
                     continue
 
                 enabled.append(v)
@@ -4093,7 +4154,11 @@ This account will be skipped until issue is resolved."""
         for t in enabled:
             if STOP_FLAG:
                 break
-
+            
+            allowed, reason = self._is_task_allowed(t)
+            if not allowed:
+                skipped_types.append(t)
+                continue
 
             tasks = self.get_tasks(t)
 
@@ -4234,14 +4299,14 @@ This account will be skipped until issue is resolved."""
             if STOP_FLAG:
                 print(f"\n{Y}⏸ Stopping task processing...{W}")
                 break
+            
+            task_type = task.get('type', '')
+            
+            allowed, reason = self._is_task_allowed(task_type)
+            if not allowed:
+                stats['action_skip'] += 1
+                continue
 
-
-            if hasattr(self, 'vk_flood_detected_this_cycle') and self.vk_flood_detected_this_cycle:
-
-                task_type = task.get('type', '')
-                vk_task_types = ['friends', 'group', 'likes', 'repost', 'poll', 'video']
-                if task_type in vk_task_types:
-                    continue
 
             if max_tasks and done >= max_tasks:
                 break

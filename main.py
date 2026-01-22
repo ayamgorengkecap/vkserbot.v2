@@ -931,16 +931,13 @@ def run_selected_accounts():
                                 'verified_at': time.strftime('%Y-%m-%d %H:%M:%S')
                             }
                             
-                            print(f"{G}✓ New proxy bound: {new_proxy['ip']} ({new_proxy['ip_info']['country']}){W}
-")
+                            print(f"{G}✓ New proxy bound: {new_proxy['ip']} ({new_proxy['ip_info']['country']}){W}\n")
                         else:
-                            print(f"{R}✗ Failed to get new proxy, skipping {folder}{W}
-")
+                            print(f"{R}✗ Failed to get new proxy, skipping {folder}{W}\n")
                             os.chdir(original_cwd)
                             continue
                     else:
-                        print(f"{R}✗ No proxy pool available, skipping {folder}{W}
-")
+                        print(f"{R}✗ No proxy pool available, skipping {folder}{W}\n")
                         os.chdir(original_cwd)
                         continue
 
@@ -1607,16 +1604,13 @@ def run_all_accounts():
                                 'verified_at': time.strftime('%Y-%m-%d %H:%M:%S')
                             }
                             
-                            print(f"{G}✓ New proxy bound: {new_proxy['ip']} ({new_proxy['ip_info']['country']}){W}
-")
+                            print(f"{G}✓ New proxy bound: {new_proxy['ip']} ({new_proxy['ip_info']['country']}){W}\n")
                         else:
-                            print(f"{R}✗ Failed to get new proxy, skipping {folder}{W}
-")
+                            print(f"{R}✗ Failed to get new proxy, skipping {folder}{W}\n")
                             os.chdir(original_cwd)
                             continue
                     else:
-                        print(f"{R}✗ No proxy pool available, skipping {folder}{W}
-")
+                        print(f"{R}✗ No proxy pool available, skipping {folder}{W}\n")
                         os.chdir(original_cwd)
                         continue
 

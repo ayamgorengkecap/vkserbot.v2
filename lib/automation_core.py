@@ -2491,6 +2491,10 @@ class VKSerfingBot:
         self.allow_direct = False
         proxy_string = config.get('proxy', {}).get('proxy_string', '')
 
+        # Initialize proxy attributes
+        self.current_proxy_ip = None
+        self.proxy_info = None
+
         # Get global proxy pool
         proxy_pool = get_proxy_pool()
         

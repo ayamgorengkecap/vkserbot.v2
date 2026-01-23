@@ -3988,6 +3988,11 @@ This account will be skipped until issue is resolved."""
             self.vk_flood_detected_this_cycle = True
             return "FLOOD_SKIP"
 
+        # TG flood wait - skip semua TG followers
+        if action_result == "TG_JOIN_FLOOD":
+            print(f" {Y}⚠ Telegram Flood Wait detected - stopping all TG follower tasks{W}")
+            return "FLOOD_SKIP"
+
 
         if ok:
 
@@ -4001,16 +4006,17 @@ This account will be skipped until issue is resolved."""
             if CLEAN_OUTPUT_AVAILABLE and isinstance(action_result, str) and len(action_result) > 0:
                 CleanOutput.task_result(t, False, action_result[:50])
 
+            # HANYA track consecutive errors untuk NON-TELEGRAM tasks
+            # TG followers error (bad username, already joined) TIDAK di-skip
+            if not t.startswith('telegram_'):
+                if t not in self.task_type_errors:
+                    self.task_type_errors[t] = 0
+                self.task_type_errors[t] += 1
 
-            if t not in self.task_type_errors:
-                self.task_type_errors[t] = 0
-            self.task_type_errors[t] += 1
-
-
-            if self.task_type_errors[t] >= 3 and t not in self.task_type_skip:
-                self.task_type_skip.add(t)
-                print(f"  {R}⚠ Task type '{t}' has {self.task_type_errors[t]} consecutive errors{W}")
-                print(f"  {Y}→ Skipping all '{t}' tasks until issue resolved{W}")
+                if self.task_type_errors[t] >= 3 and t not in self.task_type_skip:
+                    self.task_type_skip.add(t)
+                    print(f"  {R}⚠ Task type '{t}' has {self.task_type_errors[t]} consecutive errors{W}")
+                    print(f"  {Y}→ Skipping all '{t}' tasks until issue resolved{W}")
 
 
         if not ok:

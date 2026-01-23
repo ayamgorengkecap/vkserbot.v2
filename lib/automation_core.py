@@ -4128,10 +4128,19 @@ This account will be skipped until issue is resolved."""
 
         enabled = []
 
-        # REMOVED: Hardcode IG view tasks - sudah di-handle di mapping loop
+        # Auto-enable IG VIEW tasks jika IG terbind di server (tidak butuh local session)
+        ig_view_tasks = ['instagram_video', 'instagram_views', 'instagram_story']
+        if hasattr(self, 'has_ig_account') and self.has_ig_account:
+            for ig_view in ig_view_tasks:
+                if ig_view in mapping.values():
+                    enabled.append(ig_view)
 
         for k, v in mapping.items():
             if self.config.get('task_types', {}).get(k):
+                # Skip jika sudah di-add (IG view tasks auto-enabled)
+                if v in enabled:
+                    continue
+                
                 # Check apakah task allowed (sudah handle ACTION vs VIEW)
                 allowed, reason = self._is_task_allowed(v)
                 if not allowed:

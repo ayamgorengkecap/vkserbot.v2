@@ -45,6 +45,15 @@ class WebshareProxyPool:
         
         print(f"{G}[ProxyPool] Initialized with {len(self.api_keys)} Webshare API keys{W}")
     
+    def reload_api_keys(self):
+        """Force reload API keys from config (for runtime updates)"""
+        new_keys = self._load_api_keys()
+        if new_keys and new_keys != self.api_keys:
+            self.api_keys = new_keys
+            print(f"{G}[ProxyPool] ✓ Reloaded {len(self.api_keys)} API keys{W}")
+            return True
+        return False
+    
     def _load_api_keys(self) -> List[str]:
         """Load API keys from config"""
         import os
@@ -77,6 +86,9 @@ class WebshareProxyPool:
                 'proxy_url': str
             }
         """
+        # Auto-reload API keys setiap fetch (untuk detect config changes)
+        self.reload_api_keys()
+        
         exclude_ips = exclude_ips or set()
         all_proxies = []
         

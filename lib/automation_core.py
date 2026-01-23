@@ -2640,8 +2640,12 @@ class VKSerfingBot:
                 login_success = self.ig.login(ig['username'], ig['password'], alternative=alternative, account_name=self.account_name)
                 if login_success:
                     self.instagram_enabled = True
+                    print(f"{G}[IG] instagram_enabled = True (login success){W}")
                 elif self.ig.otp_required:
                     self.instagram_enabled = True
+                    print(f"{Y}[IG] instagram_enabled = True (OTP required){W}")
+                else:
+                    print(f"{R}[IG] instagram_enabled = False (login failed){W}")
 
         self.tg = None
         self.tg_client = None
@@ -4177,14 +4181,14 @@ This account will be skipped until issue is resolved."""
             
             allowed, reason = self._is_task_allowed(t)
             if not allowed:
-                skipped_types.append(t)
+                skipped_types.append((t, reason))  # Save reason
                 continue
 
             tasks = self.get_tasks(t)
 
             if tasks is None:
 
-                skipped_types.append(t)
+                skipped_types.append((t, "fetch failed"))  # Save reason
                 continue
 
             task_count = len(tasks)
@@ -4192,6 +4196,16 @@ This account will be skipped until issue is resolved."""
 
             if task_count > 0:
                 all_tasks.extend(tasks)
+
+        # Print skipped task types with reasons
+        if skipped_types:
+            print(f"\n{Y}⚠ Skipped task types:{W}")
+            for item in skipped_types:
+                if isinstance(item, tuple):
+                    task_type, reason = item
+                    print(f"  → {task_type}: {reason}")
+                else:
+                    print(f"  → {item}")
 
 
         if CLEAN_OUTPUT_AVAILABLE:

@@ -2653,15 +2653,16 @@ class VKSerfingBot:
 
         tg_config = config.get('telegram', {})
 
-
+        # Support both session_string and session_file
         has_session_string = tg_config.get('session_string') and tg_config.get('session_string') != 'null'
-        has_session_file = tg_config.get('session') and tg_config.get('session') != 'null'
+        has_session_file = tg_config.get('session_file') and tg_config.get('session_file') != 'null'
         is_bound = tg_config.get('bound', False)
 
         if is_bound and (has_session_string or has_session_file):
             self.telegram_enabled = True
             self.tg = self
-            print(f"  {G}✓ Telegram enabled (session type: {'string' if has_session_string else 'file'}){W}")
+            session_type = 'string' if has_session_string else 'file'
+            print(f"  {G}✓ Telegram enabled (session type: {session_type}){W}")
         elif TG_AVAILABLE:
             try:
                 self.tg = TelegramWrapper()
@@ -2669,78 +2670,18 @@ class VKSerfingBot:
             except: pass
 
     def _tg_reconnect(self):
-        """Reconnect Telegram client on session error - with auto-rotate from sessions folder"""
+        """Reconnect Telegram client on session error"""
         try:
             if hasattr(self, 'tg_client') and self.tg_client:
                 self.tg_client.disconnect()
             
-            tg_config = self.config.get('telegram', {})
-            session_string = tg_config.get('session_string')
+            # Re-initialize client
+            return self._ensure_tg_client()
             
-            if session_string:
-                from telethon.sync import TelegramClient
-                from telethon.sessions import StringSession
-                api_id = tg_config.get('api_id', 1724399)
-                api_hash = tg_config.get('api_hash', '7f6c4af5220db320413ff672093ee102')
-                
-                # Try reconnect with existing session
-                self.tg_client = TelegramClient(StringSession(session_string), api_id, api_hash)
-                self.tg_client.connect()
-                
-                if self.tg_client.is_user_authorized():
-                    print(f"{G}[TG] Reconnect success{W}")
-                    return True
-                else:
-                    print(f"{Y}[TG] Session not authorized - trying auto-rotate...{W}")
-                    self.tg_client.disconnect()
-                    
-                    # Auto-rotate from sessions folder
-                    if self._auto_rotate_telegram_session():
-                        print(f"{G}[TG] Auto-rotate success, reconnecting...{W}")
-                        return self._tg_reconnect()  # Recursive with new session
-                    else:
-                        print(f"{R}[TG] Auto-rotate failed{W}")
-                        return False
         except Exception as e:
             print(f"{R}[TG] Reconnect error: {str(e)[:60]}{W}")
-            
-            # Try auto-rotate on error
-            if self._auto_rotate_telegram_session():
-                print(f"{G}[TG] Auto-rotate success after error, reconnecting...{W}")
-                return self._tg_reconnect()
         
         return False
-    
-    def _auto_rotate_telegram_session(self):
-        """Auto-rotate to new Telegram session from sessions folder"""
-        try:
-            import sys
-            import os
-            
-            # Import rotate script
-            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            sys.path.insert(0, script_dir)
-            
-            from rotate_telegram_sessions import rotate_telegram_session
-            
-            if hasattr(self, 'account_name') and self.account_name:
-                print(f"{C}[TG] Auto-rotating session for {self.account_name}...{W}")
-                success = rotate_telegram_session(self.account_name)
-                
-                if success:
-                    # Reload config
-                    import json
-                    config_path = os.path.join(script_dir, 'accounts', self.account_name, 'config.json')
-                    with open(config_path, 'r') as f:
-                        self.config = json.load(f)
-                    
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"{R}[TG] Auto-rotate error: {str(e)[:60]}{W}")
-            return False
 
     def _try_ig_relogin(self):
         """Try to relogin Instagram - DISABLED to prevent OTP triggers"""
@@ -2751,39 +2692,46 @@ class VKSerfingBot:
         return False
 
     def _ensure_tg_client(self):
-        """Lazy init telegram client when needed - support both session_string and session file"""
+        """Lazy init telegram client when needed - support both session_string and session_file"""
         if hasattr(self, 'tg_client') and self.tg_client and self.tg_client.is_connected():
             return True
 
         tg_config = self.config.get('telegram', {})
 
-
+        # Support both session_string and session_file
         session_string = tg_config.get('session_string')
-        session_file = tg_config.get('session')
+        session_file = tg_config.get('session_file')
 
         if not session_string and not session_file:
             return False
 
         try:
+            # Fix: Create event loop for thread if not exists
+            import asyncio
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+            
             from telethon.sync import TelegramClient
             from telethon.sessions import StringSession
             api_id = int(tg_config.get('api_id', 1724399))
             api_hash = tg_config.get('api_hash', '7f6c4af5220db320413ff672093ee102')
 
-
-            if session_string:
-                self.tg_client = TelegramClient(StringSession(session_string), api_id, api_hash)
-            else:
-
+            # Priority: session_file > session_string
+            if session_file:
+                # Use session file from account folder
                 import os
-                accounts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'accounts')
                 if hasattr(self, 'account_name') and self.account_name:
-                    session_dir = os.path.join(accounts_dir, self.account_name)
+                    accounts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'accounts')
+                    session_path = os.path.join(accounts_dir, self.account_name, session_file.replace('.session', ''))
                 else:
-
-                    session_dir = '.'
-                session_path = os.path.join(session_dir, session_file.replace('.session', ''))
+                    session_path = session_file.replace('.session', '')
+                
                 self.tg_client = TelegramClient(session_path, api_id, api_hash)
+            else:
+                # Use string session
+                self.tg_client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
             self.tg_client.connect()
             if self.tg_client.is_user_authorized():

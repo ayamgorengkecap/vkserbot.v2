@@ -3866,9 +3866,10 @@ This account will be skipped until issue is resolved."""
             if hasattr(self, '_ig_action_skip') and self._ig_action_skip:
                 return False, "IG action skip"
         
-        # IG VIEW tasks - TIDAK butuh IG login (view via web/proxy)
+        # IG VIEW tasks - TIDAK butuh IG login, tapi butuh IG terbind di server
         if task_type in ig_view_tasks:
-            pass  # Always allowed
+            if not hasattr(self, 'has_ig_account') or not self.has_ig_account:
+                return False, "IG not connected on server"
         
         # TG ACTION tasks - butuh TG session
         if task_type in tg_action_tasks:

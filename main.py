@@ -790,11 +790,23 @@ def run_selected_accounts():
 
     selected_folders = [folders[i] for i in sorted(selected_indices)]
 
+    # Pisahkan akun berdasarkan TG session
+    tg_accounts = []
+    non_tg_accounts = []
+    
+    for folder in selected_folders:
+        config = load_account_config(folder)
+        if config and config.get('telegram', {}).get('session_string'):
+            tg_accounts.append(folder)
+        else:
+            non_tg_accounts.append(folder)
+    
     print(f"\n{C}Akun yang akan dijalankan:{W}")
-    for i, folder in enumerate(selected_folders, 1):
-        print(f"  {i}. {G}{folder}{W}")
+    print(f"  {G}✓ Dengan TG session: {len(tg_accounts)} akun (sequential){W}")
+    print(f"  {Y}○ Tanpa TG session: {len(non_tg_accounts)} akun (batch 10){W}")
+    print(f"  {C}Total: {len(selected_folders)} akun{W}")
 
-    print(f"\n{Y}Mode: Sequential (satu per satu dalam loop){W}")
+    print(f"\n{Y}Mode: TG Priority + Batch 10 untuk non-TG{W}")
     print(f"{Y}Tekan Ctrl+C untuk menghentikan.{W}\n")
 
     input("Enter untuk mulai...")
@@ -845,14 +857,20 @@ def run_selected_accounts():
         rate_limited_accounts = []
         used_ips = {}
 
-        for idx, folder in enumerate(selected_folders, 1):
-            if STOP_FLAG:
-                print(f"\n{Y}⏸ Dihentikan oleh user{W}")
-                break
+        # PHASE 1: Run TG accounts sequentially
+        if tg_accounts:
+            print(f"\n{G}{'='*50}")
+            print(f"PHASE 1: TG Accounts ({len(tg_accounts)} akun)")
+            print(f"{'='*50}{W}\n")
+            
+            for idx, folder in enumerate(tg_accounts, 1):
+                if STOP_FLAG:
+                    print(f"\n{Y}⏸ Dihentikan oleh user{W}")
+                    break
 
-            print(f"\n{'='*50}")
-            print(f"{C}[{idx}/{len(selected_folders)}] {folder}{W}")
-            print(f"{'='*50}\n")
+                print(f"\n{'='*50}")
+                print(f"{C}[TG {idx}/{len(tg_accounts)}] {folder}{W}")
+                print(f"{'='*50}\n")
 
 
             config = load_account_config(folder)
@@ -1090,6 +1108,104 @@ def run_selected_accounts():
 
             finally:
                 os.chdir(original_cwd)
+
+        # PHASE 2: Run non-TG accounts in batches of 10
+        if non_tg_accounts and not STOP_FLAG:
+            print(f"\n{Y}{'='*50}")
+            print(f"PHASE 2: Non-TG Accounts ({len(non_tg_accounts)} akun, batch 10)")
+            print(f"{'='*50}{W}\n")
+            
+            import concurrent.futures
+            from threading import Lock
+            
+            stats_lock = Lock()
+            
+            def run_account_batch(folder):
+                """Run single account and return stats"""
+                nonlocal cycle_earned, success_count, account_balances, banned_accounts, rate_limited_accounts, used_ips
+                
+                try:
+                    config = load_account_config(folder)
+                    if not config:
+                        return None
+                    
+                    account_path = os.path.join(ACCOUNTS_DIR, folder)
+                    original_cwd_thread = os.getcwd()
+                    
+                    os.chdir(account_path)
+                    bot = VKSerfingBot(config, account_name=folder)
+                    
+                    # IP collision check (thread-safe)
+                    current_ip = None
+                    if bot.proxy_info:
+                        current_ip = bot.proxy_info.get('ip')
+                    
+                    with stats_lock:
+                        if current_ip and current_ip in used_ips:
+                            print(f"{R}[{folder}] IP collision: {current_ip} (skipped){W}")
+                            os.chdir(original_cwd_thread)
+                            return None
+                        if current_ip:
+                            used_ips[current_ip] = folder
+                    
+                    # Run bot
+                    bot.run()
+                    
+                    # Collect stats (thread-safe)
+                    earned = bot.earned
+                    balance_after = bot.balance
+                    
+                    with stats_lock:
+                        cycle_earned += earned
+                        success_count += 1
+                        
+                        ig_username = config.get('instagram', {}).get('username', 'N/A')
+                        account_balances[folder] = {
+                            'ig_name': ig_username,
+                            'balance': balance_after,
+                            'earned': earned
+                        }
+                        
+                        if hasattr(bot, 'is_banned') and bot.is_banned:
+                            banned_accounts.append({
+                                'name': folder,
+                                'balance': bot.balance,
+                                'vks_email': getattr(bot, 'server_email', 'N/A')
+                            })
+                    
+                    os.chdir(original_cwd_thread)
+                    save_account_config(folder, config)
+                    
+                    print(f"{G}✓ {folder} selesai (+{earned:.2f}₽){W}")
+                    return earned
+                    
+                except Exception as e:
+                    print(f"{R}✗ {folder} error: {str(e)[:50]}{W}")
+                    return None
+            
+            # Process in batches of 10
+            for batch_start in range(0, len(non_tg_accounts), 10):
+                if STOP_FLAG:
+                    break
+                
+                batch = non_tg_accounts[batch_start:batch_start + 10]
+                print(f"\n{C}[Batch {batch_start//10 + 1}] Processing {len(batch)} accounts...{W}")
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                    futures = {executor.submit(run_account_batch, folder): folder for folder in batch}
+                    
+                    for future in concurrent.futures.as_completed(futures):
+                        folder = futures[future]
+                        try:
+                            future.result()
+                        except Exception as e:
+                            print(f"{R}✗ {folder} exception: {str(e)[:50]}{W}")
+                
+                print(f"{G}✓ Batch {batch_start//10 + 1} selesai{W}\n")
+                
+                # Delay between batches
+                if batch_start + 10 < len(non_tg_accounts) and not STOP_FLAG:
+                    time.sleep(5)
 
 
         grand_total_earned += cycle_earned

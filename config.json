@@ -1,0 +1,57 @@
+{
+  "proxy": {
+    "proxy_string": "185.101.252.243:7274:gzjwefmf:rpwd4hm2qxwx",
+    "ip": "185.101.252.243",
+    "port": 7274,
+    "username": "gzjwefmf",
+    "password": "rpwd4hm2qxwx"
+  },
+  "user_agent": {
+    "user_agent": "Mozilla/5.0 (Linux; Android 12; DN2103) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.210 Mobile Safari/537.36",
+    "device": "OnePlus Nord 2",
+    "model": "DN2103",
+    "android_version": "12",
+    "chrome_version": "120.0.6099.210"
+  },
+  "credentials": {
+    "cookies": {
+      "sessid": "hdelabjcu316skrhr4j0a31tho",
+      "ref": "EkIJLWqJx89SjdfdN7E5bplcKxq7shHzdQ%3D%3D",
+      "xsrf_token": "NzQwZVB4M1ZaZnNOcVBlQUd5OFNsdz09",
+      "vkstoken": "VRVjGs2aARoV2m2QzWHeixBrPJyXkuOoZmm8ZrTPzs6zcRaQJFlnacTtzqNp6AQR",
+      "vksid": "NZXCGUZNpzYVmu0L4sIlJZW1pSfXj8w8laNk3t27RAKor%2Feh%2BIItV4DL50WkaC63gaG50A%3D%3D"
+    },
+    "xsrf_token": "NzQwZVB4M1ZaZnNOcVBlQUd5OFNsdz09"
+  },
+  "settings": {
+    "wait_time_min": 11,
+    "wait_time_max": 21,
+    "delay_between_tasks": 25,
+    "auto_mode": true
+  },
+  "task_types": {
+    "vk_friends": true,
+    "vk_groups": true,
+    "vk_likes": true,
+    "vk_reposts": true,
+    "vk_polls": true,
+    "vk_videos": true,
+    "vk_views": true,
+    "telegram_followers": false,
+    "telegram_views": false,
+    "instagram_followers": false,
+    "instagram_likes": false,
+    "instagram_comments": false,
+    "instagram_videos": false
+  },
+  "vk_api": {
+    "enabled": true,
+    "access_token": "vk1.a.74C1USlWM8ebrRig3K7xBLzohficvRmpgrueN0uCRH8Jtm0GWYyYoJwj7EbdmoUNSgjEPG798kfLjOrqJ1Ce_fgmmz8oXoDtvxqAOEkGJEBN5G2jMhJkXFkH2CqBtVMUUUJWVOIvAB74SwEnnWizlsKTtchYIg3qc1u6ATurx4N3EvtBhIVHqsonpadp0VEqM2_DMDM_LVVf9IBdpfCMCw",
+    "user_id": "1096396677"
+  },
+  "instagram": {
+    "enabled": false,
+    "username": "",
+    "password": ""
+  }
+}

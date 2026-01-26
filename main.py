@@ -857,20 +857,31 @@ def run_selected_accounts():
         rate_limited_accounts = []
         used_ips = {}
 
-        # PHASE 1: Run TG accounts sequentially
+        # PHASE 1: Run TG accounts in batches of 10
         if tg_accounts:
             print(f"\n{G}{'='*50}")
-            print(f"PHASE 1: TG Accounts ({len(tg_accounts)} akun)")
+            print(f"PHASE 1: TG Accounts ({len(tg_accounts)} akun, batch 10)")
             print(f"{'='*50}{W}\n")
             
-            for idx, folder in enumerate(tg_accounts, 1):
+            # Process in batches of 10
+            for batch_start in range(0, len(tg_accounts), 10):
                 if STOP_FLAG:
-                    print(f"\n{Y}⏸ Dihentikan oleh user{W}")
                     break
+                
+                batch = tg_accounts[batch_start:batch_start + 10]
+                batch_num = batch_start // 10 + 1
+                total_batches = (len(tg_accounts) + 9) // 10
+                
+                print(f"\n{C}[TG Batch {batch_num}/{total_batches}] Processing {len(batch)} accounts...{W}\n")
+                
+                for idx, folder in enumerate(batch, 1):
+                    if STOP_FLAG:
+                        print(f"\n{Y}⏸ Dihentikan oleh user{W}")
+                        break
 
-                print(f"\n{'='*50}")
-                print(f"{C}[TG {idx}/{len(tg_accounts)}] {folder}{W}")
-                print(f"{'='*50}\n")
+                    print(f"\n{'='*50}")
+                    print(f"{C}[TG {batch_start + idx}/{len(tg_accounts)}] {folder}{W}")
+                    print(f"{'='*50}\n")
 
 
             config = load_account_config(folder)
@@ -1092,7 +1103,7 @@ def run_selected_accounts():
                 save_account_config(folder, config)
 
 
-                if idx < len(selected_folders) and not STOP_FLAG:
+                if idx < len(batch) and not STOP_FLAG:
                     delay = 5
                     print(f"Delay {delay} detik sebelum akun berikutnya...")
                     time.sleep(delay)
@@ -1108,6 +1119,12 @@ def run_selected_accounts():
 
             finally:
                 os.chdir(original_cwd)
+        
+                # Delay between TG batches
+                if batch_start + 10 < len(tg_accounts) and not STOP_FLAG:
+                    batch_delay = 10
+                    print(f"\n{Y}⏳ Batch delay {batch_delay}s before next TG batch...{W}\n")
+                    time.sleep(batch_delay)
 
         # PHASE 2: Run non-TG accounts in batches of 10
         if non_tg_accounts and not STOP_FLAG:
@@ -4358,10 +4375,11 @@ def bind_telegram_to_account():
                 if cont != 'y':
                     break
 
+                # Re-print remaining accounts
                 print(f"\n{Y}Akun tersisa ({len(accounts_no_tg)}):{W}")
-                for i, (acc, bal) in enumerate(accounts_no_tg, 1):
-                    b_color = G if bal >= 100 else Y if bal >= 50 else W
-                    print(f"  {i}. {acc:<14} {b_color}{bal:>6.2f}₽{W}")
+                for i, r in enumerate(accounts_no_tg, 1):
+                    b_color = G if r['balance'] >= 100 else Y if r['balance'] >= 50 else W
+                    print(f"  {i}. {r['account']:<14} {b_color}{r['balance']:>6.2f}₽{W}")
             else:
                 print(f"{R}Nomor tidak valid!{W}")
         except ValueError:

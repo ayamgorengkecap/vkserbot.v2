@@ -41,7 +41,6 @@ def get_web_telegram_username(config):
     try:
         import requests
         import re
-        import html
         
         cookies = config.get('credentials', {}).get('cookies', {})
         proxy_str = config.get('proxy', {}).get('proxy_string')
@@ -49,10 +48,18 @@ def get_web_telegram_username(config):
         session = requests.Session()
         
         if proxy_str:
-            parts = proxy_str.split(':')
-            if len(parts) == 4:
-                proxy_url = f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
-                session.proxies = {'http': proxy_url, 'https': proxy_url}
+            # Support both formats:
+            # 1. http://user:pass@ip:port
+            # 2. ip:port:user:pass
+            if proxy_str.startswith('http'):
+                # Already in correct format
+                session.proxies = {'http': proxy_str, 'https': proxy_str}
+            else:
+                # Convert ip:port:user:pass to http://user:pass@ip:port
+                parts = proxy_str.split(':')
+                if len(parts) == 4:
+                    proxy_url = f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+                    session.proxies = {'http': proxy_url, 'https': proxy_url}
         
         session.cookies.update(cookies)
         
@@ -140,29 +147,49 @@ def match_and_copy_session(account_name):
     return False
 
 def scan_all_accounts():
-    """Scan all accounts and match sessions"""
+    """Scan all accounts and match sessions in batches of 10"""
     accounts = [d for d in os.listdir(ACCOUNTS_DIR) if os.path.isdir(os.path.join(ACCOUNTS_DIR, d))]
     
-    print(f"📊 Scanning {len(accounts)} accounts...\n")
+    print(f"📊 Scanning {len(accounts)} accounts in batches of 10...\n")
     
     matched = 0
     skipped = 0
     failed = 0
     
-    for account in sorted(accounts):
-        result = match_and_copy_session(account)
+    # Process in batches of 10
+    for batch_start in range(0, len(accounts), 10):
+        batch = accounts[batch_start:batch_start + 10]
+        batch_num = batch_start // 10 + 1
+        total_batches = (len(accounts) + 9) // 10
         
-        if result is True:
-            matched += 1
-        elif result is False:
-            failed += 1
-        else:
-            skipped += 1
+        print(f"{'='*60}")
+        print(f"Batch {batch_num}/{total_batches} ({len(batch)} accounts)")
+        print(f"{'='*60}\n")
+        
+        for account in sorted(batch):
+            result = match_and_copy_session(account)
+            
+            if result is True:
+                matched += 1
+            elif result is False:
+                failed += 1
+            else:
+                skipped += 1
+        
+        # Delay between batches to avoid rate limit
+        if batch_start + 10 < len(accounts):
+            import time
+            delay = 5
+            print(f"\n⏳ Waiting {delay}s before next batch...\n")
+            time.sleep(delay)
     
-    print(f"\n📊 Summary:")
+    print(f"\n{'='*60}")
+    print(f"📊 Final Summary:")
+    print(f"{'='*60}")
     print(f"  ✅ Matched: {matched}")
     print(f"  ❌ Failed: {failed}")
     print(f"  ⚠️  Skipped: {skipped}")
+    print(f"  📊 Total: {len(accounts)}")
 
 if __name__ == "__main__":
     import sys

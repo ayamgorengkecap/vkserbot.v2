@@ -89,6 +89,12 @@ class WebshareProxyPool:
         # Auto-reload API keys setiap fetch (untuk detect config changes)
         self.reload_api_keys()
         
+        # Clear global used IPs if too many (allow reuse after threshold)
+        with self.pool_lock:
+            if len(self.global_used_ips) > 20:  # Lower threshold for more reuse
+                print(f"{Y}[ProxyPool] Clearing {len(self.global_used_ips)} used IPs (allow reuse){W}")
+                self.global_used_ips.clear()
+        
         exclude_ips = exclude_ips or set()
         all_proxies = []
         
@@ -101,7 +107,7 @@ class WebshareProxyPool:
                 all_proxies.extend(proxies)
                 print(f"{G}[ProxyPool] ✓ Key {idx}/{len(self.api_keys)}: {len(proxies)} proxies{W}")
             except Exception as e:
-                print(f"{R}[ProxyPool] ✗ Key {idx}/{len(self.api_keys)} failed: {e}{W}")
+                print(f"{R}[ProxyPool] ✗ Key {idx}/{len(self.api_keys)} failed: {str(e)[:60]}{W}")
                 continue
         
         if not all_proxies:

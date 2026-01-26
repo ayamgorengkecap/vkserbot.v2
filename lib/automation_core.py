@@ -2840,6 +2840,9 @@ class VKSerfingBot:
 
 
         if self.request_manager.is_aborted():
+            if not hasattr(self, '_aborted_printed'):
+                print(f"{R}[{self.account_name}] Request manager ABORTED - skipping all requests{W}")
+                self._aborted_printed = True
             return None
 
 
@@ -3376,7 +3379,7 @@ This account will be skipped until issue is resolved."""
                 tasks.append({'id': int(id_match.group(1)), 'link': task_link, 'type': t})
             return tasks
         except Exception as e:
-
+            print(f"{R}[get_tasks] {t} error: {str(e)[:60]}{W}")
             return None
 
     def begin(self, aid, retry_after_refresh=False):
@@ -4342,6 +4345,11 @@ This account will be skipped until issue is resolved."""
             allowed, reason = self._is_task_allowed(task_type)
             if not allowed:
                 stats['action_skip'] += 1
+                # Debug: Print skip reason per task type (group by type)
+                skip_key = f"skip_{task_type}"
+                if not hasattr(self, skip_key):
+                    setattr(self, skip_key, True)
+                    print(f"  {Y}⚠ Skipping {task_type}: {reason}{W}")
                 continue
 
 
@@ -4462,8 +4470,9 @@ This account will be skipped until issue is resolved."""
 
         self._disconnect_tg_client()
 
-
-        self.earned = self.balance - start
+        # Fetch final balance from server to ensure accuracy
+        final_balance = self.get_balance()
+        self.earned = final_balance - start
 
 
         if CLEAN_OUTPUT_AVAILABLE:

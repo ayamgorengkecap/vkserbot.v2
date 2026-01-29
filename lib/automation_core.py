@@ -3723,9 +3723,12 @@ This account will be skipped until issue is resolved."""
 
 
             if 'Error 14' in error_str or 'Captcha' in error_str:
-                self.vk_captcha_required = True
-                print(f"  {Y}⚠ VK Captcha required - skipping all VK tasks this cycle{W}")
-                return "VK_CAPTCHA_REQUIRED"
+                print(f"  {Y}⚠ VK Captcha required for {t} task - skipping this task type{W}")
+                # Mark this specific task type as having captcha issue
+                if not hasattr(self, 'vk_captcha_tasks'):
+                    self.vk_captcha_tasks = set()
+                self.vk_captcha_tasks.add(t)
+                return False  # Skip only this task, not all VK tasks
 
 
             if 'Flood control' in error_str or 'Too many requests' in error_str or 'Error 6' in error_str:
@@ -3853,8 +3856,9 @@ This account will be skipped until issue is resolved."""
         if task_type in vk_action_tasks:
             if self.vk_account_blocked:
                 return False, "VK account blocked"
-            if self.vk_captcha_required:
-                return False, "VK captcha required"
+            # Check if this specific task type has captcha issue
+            if hasattr(self, 'vk_captcha_tasks') and task_type in self.vk_captcha_tasks:
+                return False, f"VK captcha required for {task_type}"
             if hasattr(self, 'vk_flood_control_until') and time.time() < self.vk_flood_control_until:
                 return False, "VK flood control"
             if not hasattr(self, 'vk') or self.vk is None:

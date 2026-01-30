@@ -21,6 +21,22 @@ MAX_WORKERS = 10
 G, R, Y, C, W = '\033[92m', '\033[91m', '\033[93m', '\033[96m', '\033[0m'
 
 
+def parse_settings_html(html_content):
+    """Parse email from /settings HTML"""
+    import html as html_module
+    
+    email = None
+    init_match = re.search(r':init-data="([^"]+)"', html_content)
+    if init_match:
+        try:
+            init_str = html_module.unescape(init_match.group(1))
+            init_data = json.loads(init_str)
+            email = init_data.get('email')
+        except:
+            pass
+    return email
+
+
 def parse_proxy_string(proxy_str):
     """Parse proxy string to http://user:pass@ip:port format"""
     if not proxy_str:
@@ -445,6 +461,16 @@ def check_history():
             session = get_session(config)
             balance, withdrawals = get_withdrawal_history(session)
             
+            # Fetch email from /settings
+            email = '-'
+            try:
+                resp = session.get('https://vkserfing.com/settings', timeout=10)
+                if resp.status_code == 200:
+                    html = resp.json().get('html', '')
+                    email = parse_settings_html(html) or '-'
+            except:
+                pass
+            
             # Separate by status
             pending = [w for w in withdrawals if w['status'] == 'Pending']
             paid = [w for w in withdrawals if w['status'] == 'Paid']
@@ -452,6 +478,7 @@ def check_history():
             
             return {
                 'folder': folder, 
+                'email': email,
                 'balance': balance, 
                 'pending': pending,
                 'paid': paid,
@@ -493,21 +520,6 @@ def check_history():
         has_wd = r.get('pending') or r.get('paid') or r.get('rejected')
         
         if has_wd:
-            # Get email from config
-            config_path = os.path.join(ACCOUNTS_DIR, r['folder'], 'config.json')
-            email = '-'
-            try:
-                with open(config_path) as f:
-                    cfg = json.load(f)
-                    email = cfg.get('credentials', {}).get('email', '-')
-                    if not email or email == '-':
-                        # Try from user_agent or other sources
-                        email = cfg.get('email', '-')
-            except:
-                pass
-            
-            r['email'] = email
-            
             for w in r.get('pending', []):
                 total_pending += 1
                 total_pending_amount += int(w['amount'])

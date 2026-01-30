@@ -114,6 +114,15 @@ def get_withdrawal_history(session, domain='https://vkserfing.com'):
             # Extract date for matching with cashout table
             date_str = time.strip()
             
+            # Translate Russian date to English
+            date_str = date_str.replace('января', 'Jan').replace('февраля', 'Feb').replace('марта', 'Mar')
+            date_str = date_str.replace('апреля', 'Apr').replace('мая', 'May').replace('июня', 'Jun')
+            date_str = date_str.replace('июля', 'Jul').replace('августа', 'Aug').replace('сентября', 'Sep')
+            date_str = date_str.replace('октября', 'Oct').replace('ноября', 'Nov').replace('декабря', 'Dec')
+            date_str = date_str.replace('в', 'at').replace('часов назад', 'hours ago').replace('час назад', 'hour ago')
+            date_str = date_str.replace('минут назад', 'min ago').replace('только что', 'just now')
+            date_str = date_str.replace('вчера', 'yesterday').replace('сегодня', 'today')
+            
             # Initial status from notification text
             if 'Создан запрос на вывод' in text_clean:
                 status = 'Pending'
@@ -134,10 +143,10 @@ def get_withdrawal_history(session, domain='https://vkserfing.com'):
                     item_amount_match = re.search(r'<span class="text-style">(\d+)\s*₽</span>', item_html)
                     if item_amount_match and item_amount_match.group(1) == amount:
                         # Found matching amount, check status
-                        if 'Выплачено' in item_html:
+                        if 'Выплачено' in item_html:  # Paid
                             status = 'Paid'  # Override
                             break
-                        elif 'Не выплачено' in item_html:
+                        elif 'Не выплачено' in item_html:  # Not paid
                             status = 'Pending'
                             break
             

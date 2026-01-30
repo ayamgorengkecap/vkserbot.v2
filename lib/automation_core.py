@@ -1563,6 +1563,10 @@ class InstagramBot:
             self.client.set_proxy(None)
         except ImportError:
             self.client = None
+            print(f"{R}[IG] instagrapi module not installed{W}")
+        except Exception as e:
+            self.client = None
+            print(f"{R}[IG] Failed to initialize Instagram client: {e}{W}")
 
     def _apply_device_fingerprint(self, client, fingerprint=None):
         """Apply device fingerprint to client"""
@@ -2669,12 +2673,11 @@ class VKSerfingBot:
         return False
 
     def _ensure_tg_client(self):
-        """Lazy init telegram client when needed - support both session_string and session file"""
+        """Lazy init telegram client when needed - support both session_string and session file with auto-fallback"""
         if hasattr(self, 'tg_client') and self.tg_client and self.tg_client.is_connected():
             return True
 
         tg_config = self.config.get('telegram', {})
-
 
         session_string = tg_config.get('session_string')
         session_file = tg_config.get('session')
@@ -2688,27 +2691,113 @@ class VKSerfingBot:
             api_id = int(tg_config.get('api_id', 1724399))
             api_hash = tg_config.get('api_hash', '7f6c4af5220db320413ff672093ee102')
 
-
+            # Try session string first
             if session_string:
-                self.tg_client = TelegramClient(StringSession(session_string), api_id, api_hash)
-            else:
+                try:
+                    self.tg_client = TelegramClient(StringSession(session_string), api_id, api_hash)
+                    self.tg_client.connect()
+                    if self.tg_client.is_user_authorized():
+                        return True
+                    
+                    # String session invalid, try fallback
+                    print(f"{Y}⚠ TG string session invalid, trying fallback...{W}")
+                    self.tg_client.disconnect()
+                    self.tg_client = None
+                except Exception as e:
+                    print(f"{Y}⚠ TG string session error: {str(e)[:40]}{W}")
+                    if hasattr(self, 'tg_client') and self.tg_client:
+                        try: self.tg_client.disconnect()
+                        except: pass
+                    self.tg_client = None
 
-                import os
-                accounts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'accounts')
-                if hasattr(self, 'account_name') and self.account_name:
+            # Fallback 1: Try specified session file
+            if session_file:
+                try:
+                    import os
+                    accounts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'accounts')
+                    if hasattr(self, 'account_name') and self.account_name:
+                        session_dir = os.path.join(accounts_dir, self.account_name)
+                    else:
+                        session_dir = '.'
+                    session_path = os.path.join(session_dir, session_file.replace('.session', ''))
+                    
+                    self.tg_client = TelegramClient(session_path, api_id, api_hash)
+                    self.tg_client.connect()
+                    if self.tg_client.is_user_authorized():
+                        print(f"{G}✓ TG loaded from session file{W}")
+                        
+                        # Auto-update config with new string session
+                        try:
+                            new_session_string = self.tg_client.session.save()
+                            self.config['telegram']['session_string'] = new_session_string
+                            print(f"{C}  → Auto-updated string session in config{W}")
+                        except:
+                            pass
+                        
+                        return True
+                    
+                    self.tg_client.disconnect()
+                    self.tg_client = None
+                except Exception as e:
+                    print(f"{Y}⚠ Session file error: {str(e)[:40]}{W}")
+                    if hasattr(self, 'tg_client') and self.tg_client:
+                        try: self.tg_client.disconnect()
+                        except: pass
+                    self.tg_client = None
+
+            # Fallback 2: Auto-detect session file by account name
+            if hasattr(self, 'account_name') and self.account_name:
+                try:
+                    import os
+                    accounts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'accounts')
                     session_dir = os.path.join(accounts_dir, self.account_name)
-                else:
+                    
+                    # Look for telegram_*.session files
+                    session_files = []
+                    if os.path.exists(session_dir):
+                        for f in os.listdir(session_dir):
+                            if f.startswith('telegram_') and f.endswith('.session'):
+                                session_files.append(f)
+                    
+                    if session_files:
+                        # Try first session file found
+                        session_file = session_files[0]
+                        session_path = os.path.join(session_dir, session_file.replace('.session', ''))
+                        
+                        print(f"{C}  → Auto-detected session file: {session_file}{W}")
+                        
+                        self.tg_client = TelegramClient(session_path, api_id, api_hash)
+                        self.tg_client.connect()
+                        if self.tg_client.is_user_authorized():
+                            print(f"{G}✓ TG loaded from auto-detected session{W}")
+                            
+                            # Auto-update config
+                            try:
+                                new_session_string = self.tg_client.session.save()
+                                me = self.tg_client.get_me()
+                                
+                                self.config['telegram']['session_string'] = new_session_string
+                                self.config['telegram']['session'] = session_file
+                                self.config['telegram']['user_id'] = me.id
+                                self.config['telegram']['username'] = me.username or ''
+                                
+                                print(f"{C}  → Auto-updated config (@{me.username}){W}")
+                            except:
+                                pass
+                            
+                            return True
+                        
+                        self.tg_client.disconnect()
+                        self.tg_client = None
+                except Exception as e:
+                    print(f"{Y}⚠ Auto-detect failed: {str(e)[:40]}{W}")
+                    if hasattr(self, 'tg_client') and self.tg_client:
+                        try: self.tg_client.disconnect()
+                        except: pass
+                    self.tg_client = None
 
-                    session_dir = '.'
-                session_path = os.path.join(session_dir, session_file.replace('.session', ''))
-                self.tg_client = TelegramClient(session_path, api_id, api_hash)
-
-            self.tg_client.connect()
-            if self.tg_client.is_user_authorized():
-                return True
-            self.tg_client.disconnect()
-            self.tg_client = None
             return False
+            
         except Exception as e:
             print(f"{Y}⚠ TG client init: {str(e)[:40]}{W}")
             if hasattr(self, 'tg_client') and self.tg_client:
@@ -4073,6 +4162,9 @@ This account will be skipped until issue is resolved."""
                         print(f"  {Y}Skipping Instagram {v} - {action_type} rate limited{W}")
                         continue
                 if v.startswith('telegram_') and not self.telegram_enabled:
+                    print(f"  {R}[DEBUG] Skipping Telegram {v} - telegram_enabled={self.telegram_enabled}{W}")
+                    tg_config = self.config.get('telegram', {})
+                    print(f"  {R}[DEBUG] TG config: bound={tg_config.get('bound')}, has_session_string={bool(tg_config.get('session_string'))}{W}")
                     continue
                 if v.startswith('tiktok_') and not self.has_tiktok_account:
                     print(f"  {Y}Skipping TikTok tasks - account not connected{W}")

@@ -21,6 +21,20 @@ MAX_WORKERS = 10
 G, R, Y, C, W = '\033[92m', '\033[91m', '\033[93m', '\033[96m', '\033[0m'
 
 
+def parse_proxy_string(proxy_str):
+    """Parse proxy string to http://user:pass@ip:port format"""
+    if not proxy_str:
+        return None
+    if proxy_str.startswith('http'):
+        return proxy_str
+    if proxy_str.count(':') == 3:
+        parts = proxy_str.split(':')
+        return f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+    if proxy_str.count(':') == 1:
+        return f"http://{proxy_str}"
+    return proxy_str
+
+
 def get_session(config):
     """Create session with cookies and headers"""
     creds = config.get('credentials', {})
@@ -40,56 +54,77 @@ def get_session(config):
     })
 
     if proxy_str:
-        s.proxies = {'http': proxy_str, 'https': proxy_str}
+        proxy = parse_proxy_string(proxy_str)
+        if proxy:
+            s.proxies = {'http': proxy, 'https': proxy}
 
     return s
 
 
 def get_withdrawal_history(session, domain='https://vkserfing.com'):
-    """Get withdrawal history from /cashout"""
+    """
+    Get withdrawal history from /notifications
+    ⚠️ CRITICAL: Status determined by TEXT content, NOT CSS class!
+    """
     try:
-        r = session.get(f'{domain}/cashout', timeout=15)
+        r = session.get(f'{domain}/notifications', timeout=15)
         if r.status_code == 200:
-            html = r.json().get('html', '')
-            balance = float(r.json().get('data', {}).get('balance', '0'))
-
-
+            resp_json = r.json()
+            html = resp_json.get('html', '')
+            
+            # Get balance from response data
+            balance = float(resp_json.get('data', {}).get('balance', '0'))
+            
+            # Parse withdrawal events from notifications
+            pattern = r'<div class="notify notify--(\w+)\s*([^"]*)">\s*<span class="notify__text">\s*(.*?)\s*</span>\s*<span class="notify__time">(.*?)</span>'
+            
+            matches = re.findall(pattern, html, re.DOTALL)
+            
             withdrawals = []
-
-            for match in re.finditer(r'<tr is="cashout-item" :id="(\d+)".*?</tr>', html, re.DOTALL):
-                block = match.group(0)
-                wd_id = match.group(1)
-
-
-                wallet_match = re.search(r'word-break-all">([^<]+)</div>', block)
-                wallet = wallet_match.group(1) if wallet_match else 'Unknown'
-
-
-                amount_match = re.search(r'<span class="text-style">(\d+) ₽</span>', block)
+            
+            for notify_type, extra_class, text, time in matches:
+                # Clean text
+                text_clean = re.sub(r'<[^>]+>', '', text).strip()
+                text_clean = re.sub(r'\s+', ' ', text_clean)
+                
+                # Check if it's a WD event (must have amount and specific keywords)
+                if not ('вывод' in text_clean.lower() and ('сумму' in text_clean.lower() or 'выведены' in text_clean.lower())):
+                    continue
+                
+                # Extract amount
+                amount_match = re.search(r'<b>(\d+)</b>\s*₽', text)
                 amount = amount_match.group(1) if amount_match else '0'
-
-
-                date_match = re.search(r'(\d{2}\.\d{2}\.\d{4} в \d{2}:\d{2})', block)
-                date = date_match.group(1) if date_match else 'Unknown'
-
-
-                if 'Не выплачено' in block:
+                
+                # Skip if no amount found (likely not a real WD)
+                if amount == '0':
+                    continue
+                
+                # Extract method
+                method_match = re.search(r'на\s*<b>([^<]+)</b>', text)
+                method = method_match.group(1).strip() if method_match else 'Unknown'
+                
+                # ✅ CORRECT STATUS DETERMINATION (TEXT-BASED)
+                if 'Создан запрос на вывод' in text_clean:
                     status = 'Pending'
-                elif 'Выплачено' in block:
+                elif 'Средства выведены' in text_clean or 'выплачено' in text_clean.lower():
                     status = 'Paid'
+                elif 'отклонен' in text_clean.lower() or 'отказ' in text_clean.lower():
+                    status = 'Rejected'
                 else:
                     status = 'Unknown'
-
+                
                 withdrawals.append({
-                    'id': wd_id,
-                    'wallet': wallet,
                     'amount': amount,
-                    'date': date,
-                    'status': status
+                    'method': method,
+                    'date': time.strip(),
+                    'status': status,
+                    'text': text_clean,
+                    'is_new': 'notify--new' in extra_class
                 })
-
+            
             return balance, withdrawals
     except Exception as e:
+        # Silent fail - return empty result
         pass
     return 0.0, []
 
@@ -373,8 +408,20 @@ def check_history():
                 config = json.load(f)
             session = get_session(config)
             balance, withdrawals = get_withdrawal_history(session)
+            
+            # Separate by status
             pending = [w for w in withdrawals if w['status'] == 'Pending']
-            return {'folder': folder, 'balance': balance, 'pending': pending, 'status': 'ok'}
+            paid = [w for w in withdrawals if w['status'] == 'Paid']
+            rejected = [w for w in withdrawals if w['status'] == 'Rejected']
+            
+            return {
+                'folder': folder, 
+                'balance': balance, 
+                'pending': pending,
+                'paid': paid,
+                'rejected': rejected,
+                'status': 'ok'
+            }
         except:
             return {'folder': folder, 'status': 'error'}
 
@@ -396,23 +443,44 @@ def check_history():
 
     total_pending = 0
     total_pending_amount = 0
+    total_paid = 0
+    total_paid_amount = 0
+    error_count = 0
 
     for r in sorted(results, key=lambda x: int(x['folder'].split('_')[1]) if '_' in x['folder'] else 0):
         if r['status'] == 'error':
+            error_count += 1
             continue
 
-        if r.get('pending'):
-            print(f"{Y}{r['folder']}{W} (balance: {r['balance']:.2f}₽)")
-            for w in r['pending']:
-                print(f"  └─ #{w['id']}: {w['amount']}₽ → {w['wallet']} | {w['date']} | {R}{w['status']}{W}")
-                total_pending += 1
-                total_pending_amount += int(w['amount'])
-        elif r.get('balance', 0) > 0:
-            print(f"  {r['folder']}: {r['balance']:.2f}₽ (no pending)")
+        has_wd = r.get('pending') or r.get('paid') or r.get('rejected')
+        
+        if has_wd:
+            print(f"\n{C}{r['folder']}{W} (balance: {r['balance']:.2f}₽)")
+            
+            # Show pending
+            if r.get('pending'):
+                for w in r['pending']:
+                    print(f"  {Y}⏳ PENDING{W} | {w['amount']}₽ | {w['method']} | {w['date']}")
+                    total_pending += 1
+                    total_pending_amount += int(w['amount'])
+            
+            # Show paid
+            if r.get('paid'):
+                for w in r['paid']:
+                    print(f"  {G}✓ PAID{W}    | {w['amount']}₽ | {w['method']} | {w['date']}")
+                    total_paid += 1
+                    total_paid_amount += int(w['amount'])
+            
+            # Show rejected
+            if r.get('rejected'):
+                for w in r['rejected']:
+                    print(f"  {R}✗ REJECT{W}  | {w['amount']}₽ | {w['method']} | {w['date']}")
 
     print(f"\n{C}{'='*60}{W}")
-    print(f"{Y}Total pending withdrawals: {total_pending}{W}")
-    print(f"{Y}Total pending amount: {total_pending_amount}₽{W}")
+    print(f"{Y}PENDING: {total_pending} withdrawals | {total_pending_amount}₽{W}")
+    print(f"{G}PAID:    {total_paid} withdrawals | {total_paid_amount}₽{W}")
+    if error_count > 0:
+        print(f"{R}ERRORS:  {error_count} accounts (proxy/connection issues){W}")
     print(f"{C}{'='*60}{W}")
 
 

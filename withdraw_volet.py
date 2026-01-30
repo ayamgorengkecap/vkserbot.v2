@@ -484,6 +484,21 @@ def check_history():
         has_wd = r.get('pending') or r.get('paid') or r.get('rejected')
         
         if has_wd:
+            # Get email from config
+            config_path = os.path.join(ACCOUNTS_DIR, r['folder'], 'config.json')
+            email = '-'
+            try:
+                with open(config_path) as f:
+                    cfg = json.load(f)
+                    email = cfg.get('credentials', {}).get('email', '-')
+                    if not email or email == '-':
+                        # Try from user_agent or other sources
+                        email = cfg.get('email', '-')
+            except:
+                pass
+            
+            r['email'] = email
+            
             for w in r.get('pending', []):
                 total_pending += 1
                 total_pending_amount += int(w['amount'])
@@ -495,46 +510,47 @@ def check_history():
             accounts_with_wd.append(r)
     
     # Print table header
-    print(f"{C}{'='*100}{W}")
-    print(f"{C}{'Account':<15} {'Balance':>10} {'Status':>8} {'Amount':>8} {'Method':<8} {'Date':<25}{W}")
-    print(f"{C}{'-'*100}{W}")
+    print(f"{C}{'='*120}{W}")
+    print(f"{C}{'Account':<15} {'Email':<30} {'Balance':>10} {'Status':>8} {'Amount':>8} {'Date':<25}{W}")
+    print(f"{C}{'-'*120}{W}")
     
     # Print table rows
     for r in accounts_with_wd:
         account = r['folder']
+        email = r.get('email', '-')[:28]  # Truncate long emails
         balance = f"{r['balance']:.2f}₽"
         
         # Print pending
         for w in r.get('pending', []):
             status = f"{Y}PENDING{W}"
             amount = f"{w['amount']}₽"
-            method = w['method']
             date = w['date']
-            print(f"{account:<15} {balance:>10} {status:>8} {amount:>8} {method:<8} {date:<25}")
+            print(f"{account:<15} {email:<30} {balance:>10} {status:>8} {amount:>8} {date:<25}")
             account = ""  # Only show account name once
+            email = ""
             balance = ""
         
         # Print paid
         for w in r.get('paid', []):
             status = f"{G}PAID{W}"
             amount = f"{w['amount']}₽"
-            method = w['method']
             date = w['date']
-            print(f"{account:<15} {balance:>10} {status:>8} {amount:>8} {method:<8} {date:<25}")
+            print(f"{account:<15} {email:<30} {balance:>10} {status:>8} {amount:>8} {date:<25}")
             account = ""
+            email = ""
             balance = ""
         
         # Print rejected
         for w in r.get('rejected', []):
             status = f"{R}REJECTED{W}"
             amount = f"{w['amount']}₽"
-            method = w['method']
             date = w['date']
-            print(f"{account:<15} {balance:>10} {status:>8} {amount:>8} {method:<8} {date:<25}")
+            print(f"{account:<15} {email:<30} {balance:>10} {status:>8} {amount:>8} {date:<25}")
             account = ""
+            email = ""
             balance = ""
 
-    print(f"{C}{'='*100}{W}")
+    print(f"{C}{'='*120}{W}")
     print(f"{Y}PENDING: {total_pending} withdrawals | {total_pending_amount}₽{W}")
     print(f"{G}PAID:    {total_paid} withdrawals | {total_paid_amount}₽{W}")
     if error_count > 0:

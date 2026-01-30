@@ -2350,6 +2350,7 @@ def setup_telegram_session(folder_name, config):
 
 
                 config['telegram'] = {
+                    'bound': True,
                     'api_id': DEFAULT_API_ID,
                     'api_hash': DEFAULT_API_HASH,
                     'phone': phone,
@@ -2398,6 +2399,7 @@ def setup_telegram_session(folder_name, config):
                 me = client.get_me()
 
                 config['telegram'] = {
+                    'bound': True,
                     'api_id': DEFAULT_API_ID,
                     'api_hash': DEFAULT_API_HASH,
                     'session_string': session_string,
@@ -2455,6 +2457,7 @@ def setup_telegram_session(folder_name, config):
                 session_string = StringSession.save(client.session)
 
                 config['telegram'] = {
+                    'bound': True,
                     'api_id': DEFAULT_API_ID,
                     'api_hash': DEFAULT_API_HASH,
                     'session_string': session_string,

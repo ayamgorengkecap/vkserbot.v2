@@ -63,68 +63,95 @@ def get_session(config):
 
 def get_withdrawal_history(session, domain='https://vkserfing.com'):
     """
-    Get withdrawal history from /notifications
-    ⚠️ CRITICAL: Status determined by TEXT content, NOT CSS class!
+    Get withdrawal history from DUAL SOURCES:
+    1. /notifications - for recent WD requests
+    2. /cashout - for actual payment status (Выплачено/Не выплачено)
+    
+    ⚠️ CRITICAL: Notifications don't update after payment!
+    Must check /cashout table for real status.
     """
     try:
-        r = session.get(f'{domain}/notifications', timeout=15)
-        if r.status_code == 200:
-            resp_json = r.json()
-            html = resp_json.get('html', '')
+        # Get balance and notifications
+        r_notif = session.get(f'{domain}/notifications', timeout=15)
+        if r_notif.status_code != 200:
+            return 0.0, []
+        
+        resp_json = r_notif.json()
+        html_notif = resp_json.get('html', '')
+        balance = float(resp_json.get('data', {}).get('balance', '0'))
+        
+        # Get cashout page for actual status
+        r_cashout = session.get(f'{domain}/cashout', timeout=15)
+        html_cashout = ''
+        if r_cashout.status_code == 200:
+            html_cashout = r_cashout.json().get('html', '')
+        
+        # Parse notifications for WD list
+        pattern = r'<div class="notify notify--(\w+)\s*([^"]*)">\s*<span class="notify__text">\s*(.*?)\s*</span>\s*<span class="notify__time">(.*?)</span>'
+        matches = re.findall(pattern, html_notif, re.DOTALL)
+        
+        withdrawals = []
+        
+        for notify_type, extra_class, text, time in matches:
+            text_clean = re.sub(r'<[^>]+>', '', text).strip()
+            text_clean = re.sub(r'\s+', ' ', text_clean)
             
-            # Get balance from response data
-            balance = float(resp_json.get('data', {}).get('balance', '0'))
+            # Filter: only real WD events
+            if not ('вывод' in text_clean.lower() and ('сумму' in text_clean.lower() or 'выведены' in text_clean.lower())):
+                continue
             
-            # Parse withdrawal events from notifications
-            pattern = r'<div class="notify notify--(\w+)\s*([^"]*)">\s*<span class="notify__text">\s*(.*?)\s*</span>\s*<span class="notify__time">(.*?)</span>'
+            # Extract amount
+            amount_match = re.search(r'<b>(\d+)</b>\s*₽', text)
+            amount = amount_match.group(1) if amount_match else '0'
             
-            matches = re.findall(pattern, html, re.DOTALL)
+            if amount == '0':
+                continue
             
-            withdrawals = []
+            # Extract method
+            method_match = re.search(r'на\s*<b>([^<]+)</b>', text)
+            method = method_match.group(1).strip() if method_match else 'Unknown'
             
-            for notify_type, extra_class, text, time in matches:
-                # Clean text
-                text_clean = re.sub(r'<[^>]+>', '', text).strip()
-                text_clean = re.sub(r'\s+', ' ', text_clean)
-                
-                # Check if it's a WD event (must have amount and specific keywords)
-                if not ('вывод' in text_clean.lower() and ('сумму' in text_clean.lower() or 'выведены' in text_clean.lower())):
-                    continue
-                
-                # Extract amount
-                amount_match = re.search(r'<b>(\d+)</b>\s*₽', text)
-                amount = amount_match.group(1) if amount_match else '0'
-                
-                # Skip if no amount found (likely not a real WD)
-                if amount == '0':
-                    continue
-                
-                # Extract method
-                method_match = re.search(r'на\s*<b>([^<]+)</b>', text)
-                method = method_match.group(1).strip() if method_match else 'Unknown'
-                
-                # ✅ CORRECT STATUS DETERMINATION (TEXT-BASED)
-                if 'Создан запрос на вывод' in text_clean:
-                    status = 'Pending'
-                elif 'Средства выведены' in text_clean or 'выплачено' in text_clean.lower():
-                    status = 'Paid'
-                elif 'отклонен' in text_clean.lower() or 'отказ' in text_clean.lower():
-                    status = 'Rejected'
-                else:
-                    status = 'Unknown'
-                
-                withdrawals.append({
-                    'amount': amount,
-                    'method': method,
-                    'date': time.strip(),
-                    'status': status,
-                    'text': text_clean,
-                    'is_new': 'notify--new' in extra_class
-                })
+            # Extract date for matching with cashout table
+            date_str = time.strip()
             
-            return balance, withdrawals
+            # Initial status from notification text
+            if 'Создан запрос на вывод' in text_clean:
+                status = 'Pending'
+            elif 'Средства выведены' in text_clean or 'выплачено' in text_clean.lower():
+                status = 'Paid'
+            elif 'отклонен' in text_clean.lower() or 'отказ' in text_clean.lower():
+                status = 'Rejected'
+            else:
+                status = 'Unknown'
+            
+            # Cross-check with /cashout table for real status
+            if html_cashout and amount != '0':
+                # Parse cashout table items
+                cashout_items = re.findall(r'<tr is="cashout-item"[^>]*>.*?</tr>', html_cashout, re.DOTALL)
+                
+                for item_html in cashout_items:
+                    # Check if this item matches our amount
+                    item_amount_match = re.search(r'<span class="text-style">(\d+)\s*₽</span>', item_html)
+                    if item_amount_match and item_amount_match.group(1) == amount:
+                        # Found matching amount, check status
+                        if 'Выплачено' in item_html:
+                            status = 'Paid'  # Override
+                            break
+                        elif 'Не выплачено' in item_html:
+                            status = 'Pending'
+                            break
+            
+            withdrawals.append({
+                'amount': amount,
+                'method': method,
+                'date': date_str,
+                'status': status,
+                'text': text_clean,
+                'is_new': 'notify--new' in extra_class
+            })
+        
+        return balance, withdrawals
     except Exception as e:
-        # Silent fail - return empty result
         pass
     return 0.0, []
 

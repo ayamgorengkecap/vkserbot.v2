@@ -526,7 +526,7 @@ def check_history():
         
         # Print rejected
         for w in r.get('rejected', []):
-            status = f"{R}REJECT{W}"
+            status = f"{R}REJECTED{W}"
             amount = f"{w['amount']}₽"
             method = w['method']
             date = w['date']
@@ -540,6 +540,97 @@ def check_history():
     if error_count > 0:
         print(f"{R}ERRORS:  {error_count} accounts (proxy/connection issues){W}")
     print(f"{C}{'='*100}{W}")
+    
+    # Show wallet history for PAID withdrawals
+    if total_paid > 0:
+        print(f"\n{C}Show wallet addresses for PAID withdrawals? (y/n):{W} ", end='')
+        show_wallets = input().strip().lower()
+        
+        if show_wallets == 'y':
+            print(f"\n{C}{'='*80}{W}")
+            print(f"{C}PAID Withdrawal Wallet History{W}")
+            print(f"{C}{'='*80}{W}\n")
+            
+            # Get wallet info from cashout page
+            print(f"{C}Fetching wallet details...{W}\n")
+            
+            wallet_history = {}
+            
+            for r in accounts_with_wd:
+                if not r.get('paid'):
+                    continue
+                
+                account = r['folder']
+                config_path = os.path.join(ACCOUNTS_DIR, account, 'config.json')
+                
+                try:
+                    with open(config_path) as f:
+                        config = json.load(f)
+                    
+                    session = get_session(config)
+                    resp = session.get('https://vkserfing.com/cashout', timeout=15)
+                    
+                    if resp.status_code == 200:
+                        html = resp.json().get('html', '')
+                        
+                        # Parse cashout items for wallet addresses
+                        items = re.findall(r'<tr is="cashout-item"[^>]*>.*?</tr>', html, re.DOTALL)
+                        
+                        for item in items:
+                            # Check if paid
+                            if 'Выплачено' not in item:
+                                continue
+                            
+                            # Extract amount
+                            amount_match = re.search(r'<span class="text-style">(\d+)\s*₽</span>', item)
+                            if not amount_match:
+                                continue
+                            
+                            amount = amount_match.group(1)
+                            
+                            # Check if this amount is in our paid list
+                            is_our_wd = any(w['amount'] == amount for w in r['paid'])
+                            if not is_our_wd:
+                                continue
+                            
+                            # Extract wallet
+                            wallet_match = re.search(r'word-break-all[^>]*>([^<]+)</div>', item)
+                            if wallet_match:
+                                wallet = wallet_match.group(1).strip()
+                                
+                                # Extract date
+                                date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', item)
+                                date = date_match.group(1) if date_match else 'Unknown'
+                                
+                                if wallet not in wallet_history:
+                                    wallet_history[wallet] = {
+                                        'count': 0,
+                                        'total': 0,
+                                        'accounts': set(),
+                                        'dates': []
+                                    }
+                                
+                                wallet_history[wallet]['count'] += 1
+                                wallet_history[wallet]['total'] += int(amount)
+                                wallet_history[wallet]['accounts'].add(account)
+                                wallet_history[wallet]['dates'].append(f"{amount}₽ on {date}")
+                except:
+                    pass
+            
+            # Display wallet summary
+            if wallet_history:
+                for wallet, info in wallet_history.items():
+                    print(f"{G}Wallet:{W} {C}{wallet}{W}")
+                    print(f"  Total PAID: {info['count']} withdrawals | {info['total']}₽")
+                    print(f"  Accounts: {', '.join(sorted(info['accounts']))}")
+                    print(f"  History:")
+                    for h in info['dates']:
+                        print(f"    - {h}")
+                    print()
+            else:
+                print(f"{Y}No wallet details found{W}\n")
+            
+            print(f"{C}{'='*80}{W}")
 
 
 def show_menu():

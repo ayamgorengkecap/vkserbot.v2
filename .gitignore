@@ -1,22 +1,2 @@
-# Account data (sensitive)
-accounts/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
+{"blacklisted_usernames": []}
+config/telegram_blacklist.json

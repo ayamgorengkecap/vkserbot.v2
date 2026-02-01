@@ -2627,6 +2627,10 @@ class VKSerfingBot:
         self.tg = None
         self.tg_client = None
         self.telegram_enabled = False
+        
+        # Load telegram blacklist
+        self._tg_blacklist = set()
+        self._load_telegram_blacklist()
 
         tg_config = config.get('telegram', {})
 
@@ -2644,6 +2648,28 @@ class VKSerfingBot:
                 self.tg = TelegramWrapper()
                 self.telegram_enabled = self.tg.is_available()
             except: pass
+    
+    def _load_telegram_blacklist(self):
+        """Load telegram blacklist from config file"""
+        try:
+            import os, json
+            blacklist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'telegram_blacklist.json')
+            if os.path.exists(blacklist_path):
+                with open(blacklist_path, 'r') as f:
+                    data = json.load(f)
+                    self._tg_blacklist = set(data.get('blacklisted_usernames', []))
+        except:
+            self._tg_blacklist = set()
+    
+    def _save_telegram_blacklist(self):
+        """Save telegram blacklist to config file"""
+        try:
+            import os, json
+            blacklist_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'telegram_blacklist.json')
+            with open(blacklist_path, 'w') as f:
+                json.dump({'blacklisted_usernames': sorted(list(self._tg_blacklist))}, f, indent=2)
+        except Exception as e:
+            print(f"{Y}⚠ Failed to save blacklist: {str(e)[:40]}{W}")
 
     def _tg_reconnect(self):
         """Reconnect Telegram client on session error"""
@@ -2686,6 +2712,13 @@ class VKSerfingBot:
             return False
 
         try:
+            import asyncio
+            # Fix: Create event loop for thread
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+            
             from telethon.sync import TelegramClient
             from telethon.sessions import StringSession
             api_id = int(tg_config.get('api_id', 1724399))
@@ -2828,12 +2861,30 @@ class VKSerfingBot:
                 channel = channel_link.split('t.me/')[-1].split('/')[0].split('?')[0]
             else:
                 channel = channel_link
+            
+            # Check blacklist first
+            username = channel.replace('@', '')
+            if username in self._tg_blacklist:
+                return "BLACKLISTED"
 
             self.tg_client(JoinChannelRequest(channel))
             return True
         except Exception as e:
             err = str(e)
 
+            # Blacklist: Invalid usernames that cause repeated errors
+            if any(x in err.lower() for x in ['no user has', 'nobody is using', 'username is unoccupied']):
+                # Extract username from channel if possible
+                username = channel.replace('@', '').replace('https://t.me/', '')
+                self._tg_blacklist.add(username)
+                self._save_telegram_blacklist()
+                print(f" {Y}⚠ Blacklisted: {username}{W}")
+                return "BLACKLISTED"  # Special return to skip error counting
+            
+            # Already joined/requested
+            if 'successfully requested to join' in err.lower():
+                return True  # Count as success
+            
             if 'wait of' in err.lower() and 'seconds' in err.lower():
                 import re, time
                 match = re.search(r'wait of (\d+) seconds', err.lower())
@@ -2849,7 +2900,6 @@ class VKSerfingBot:
                     except:
                         pass
             print(f" {R}TG join error: {err[:50]}{W}")
-            return False
             return False
 
     def tg_view_post(self, post_link):
@@ -3784,10 +3834,9 @@ This account will be skipped until issue is resolved."""
 
             if 'Error 14' in error_str or 'Captcha' in error_str:
                 self.vk_captcha_required = True
-                print(f"  {Y}⚠ VK Captcha required - skipping all VK tasks this cycle{W}")
-                vk_task_types = ['friends', 'likes', 'repost', 'group', 'poll', 'video']
-                for vk_task in vk_task_types:
-                    self.task_type_skip.add(vk_task)
+                print(f"  {Y}⚠ VK Captcha required - skipping only group/channel tasks{W}")
+                # Only skip group/channel tasks that trigger captcha
+                self.task_type_skip.add('group')
                 return "VK_CAPTCHA_REQUIRED"
 
 
@@ -3971,6 +4020,9 @@ This account will be skipped until issue is resolved."""
                     action_result = self.tg_join_channel(url)
                     if action_result == "FLOOD":
                         return "TG_JOIN_FLOOD"
+                    if action_result == "BLACKLISTED":
+                        # Don't count as error - invalid username
+                        return "BLACKLISTED"
                 else:
                     action_result = self.tg_view_post(url)
                 ok = action_result
@@ -4000,6 +4052,11 @@ This account will be skipped until issue is resolved."""
 
             self.vk_flood_detected_this_cycle = True
             return "FLOOD_SKIP"
+        
+        # Blacklisted username - skip without counting as error
+        if action_result == "BLACKLISTED":
+            print(f" {Y}SKIP (invalid username - blacklisted){W}")
+            return "BLACKLISTED"
 
 
         if ok:
